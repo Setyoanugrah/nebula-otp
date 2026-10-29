@@ -116,6 +116,46 @@ def migrate() -> None:
             """
         )
 
+        # v1 used project_id on codes/sends; v2 keys them by key_id. Rebuild the
+        # two affected tables rather than leaving a half-migrated schema that
+        # fails every console query.
+        for table, sql in (
+            ("codes",
+             """CREATE TABLE codes_new (
+                    id          INTEGER PRIMARY KEY,
+                    key_id      INTEGER NOT NULL,
+                    channel     TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    code_hash   TEXT NOT NULL,
+                    salt        TEXT NOT NULL,
+                    attempts    INTEGER NOT NULL DEFAULT 0,
+                    created_at  INTEGER NOT NULL,
+                    expires_at  INTEGER NOT NULL,
+                    consumed_at INTEGER
+                )"""),
+            ("sends",
+             """CREATE TABLE sends_new (
+                    id          INTEGER PRIMARY KEY,
+                    key_id      INTEGER NOT NULL,
+                    channel     TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    ok          INTEGER NOT NULL,
+                    error       TEXT,
+                    created_at  INTEGER NOT NULL
+                )"""),
+        ):
+            cols = [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
+            if "project_id" in cols:
+                con.execute(f"DROP TABLE IF EXISTS {table}_new")
+                con.execute(sql)
+                con.execute(f"DROP TABLE {table}")
+                con.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+                con.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_key ON {table}(key_id, created_at)"
+                )
+        # old projects table is unused by v2
+        con.execute("DROP TABLE IF EXISTS projects")
+
 
 migrate()
 
