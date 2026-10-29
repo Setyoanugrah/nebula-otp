@@ -88,6 +88,7 @@ jobs:
           fi
           sleep 10
           URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1)
+          [ -z "$URL" ] && URL="https://otp.rikuzetsi.my.id"
           if [ -n "$URL" ]; then
             echo "PUBLIC_URL=$URL"
             echo "### OTP service live at $URL" >> "$GITHUB_STEP_SUMMARY"
