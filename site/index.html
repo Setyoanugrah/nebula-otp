@@ -37,8 +37,8 @@ nav a:hover{color:var(--ink);text-decoration:none}
 .btn.ghost{border:1px solid var(--line);color:var(--ink)}
 .btn.ghost:hover{border-color:var(--accent);text-decoration:none}
 
-.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
- padding:36px 0 64px}
+.grid{display:grid;gap:18px;grid-template-columns:repeat(2,1fr);padding:36px 0 20px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
 .card h3{margin:0 0 10px;font-size:16.5px}
 .card p{margin:0;color:var(--dim);font-size:14.5px}
@@ -55,18 +55,21 @@ pre .k{color:#7dd3fc}
 pre .s{color:#86efac}
 pre .c{color:#5b6779}
 
-.price{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.price{display:grid;gap:18px;grid-template-columns:repeat(3,1fr);align-items:stretch}
+@media(max-width:820px){.price{grid-template-columns:1fr}}
 .plan{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;
- display:flex;flex-direction:column}
+ display:flex;flex-direction:column;height:100%}
+.price{align-items:stretch}
 .plan.hot{border-color:var(--accent);box-shadow:0 0 0 1px rgba(59,130,246,.25)}
 .tag{font-size:11.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent2);
  font-weight:700;margin-bottom:8px}
 .plan .amt{font-size:32px;font-weight:700;letter-spacing:-1px;margin:6px 0 2px}
 .plan .amt small{font-size:14px;font-weight:400;color:var(--dim);letter-spacing:0}
-.plan ul{list-style:none;padding:0;margin:18px 0 0;font-size:14.5px;color:var(--dim)}
+.plan ul{list-style:none;padding:0;margin:18px 0 0;font-size:14.5px;color:var(--dim);flex:1}
 .plan li{padding:7px 0 7px 24px;position:relative}
 .plan li::before{content:"✓";position:absolute;left:0;color:var(--ok);font-weight:700}
-.plan .btn{margin-top:auto;text-align:center;margin-top:22px}
+.plan .btn{margin-top:auto;text-align:center;margin-bottom:0}
+.plan ul{margin-bottom:22px}
 
 .note{border-left:3px solid var(--accent);background:rgba(59,130,246,.06);
  padding:16px 20px;border-radius:0 9px 9px 0;color:var(--dim);font-size:14.5px}
@@ -155,7 +158,7 @@ curl -X POST https://api.nebulaotp.id/v1/otp/verify \
       <div class="plan">
         <div class="tag">Coba</div>
         <div class="amt">Rp0</div>
-        <div style="color:var(--dim);font-size:13.5px">buat project pertama kamu</div>
+        <div style="color:var(--dim);font-size:13.5px;min-height:38px">buat project pertama kamu</div>
         <ul>
           <li>100 kode email</li>
           <li>1 API key</li>
@@ -166,7 +169,8 @@ curl -X POST https://api.nebulaotp.id/v1/otp/verify \
       </div>
       <div class="plan hot">
         <div class="tag">Populer</div>
-        <div class="amt">Rp75<small> / 1.000 kode email</small></div>
+        <div class="amt">Rp75</div>
+        <div style="color:var(--dim);font-size:13.5px;min-height:38px">per 1.000 kode email</div>
         <div style="color:var(--dim);font-size:13.5px">cocok untuk aplikasi yang tumbuh</div>
         <ul>
           <li>Email tanpa batas project</li>
@@ -178,7 +182,8 @@ curl -X POST https://api.nebulaotp.id/v1/otp/verify \
       </div>
       <div class="plan">
         <div class="tag">SMS &amp; WhatsApp</div>
-        <div class="amt">Rp450<small> / kode</small></div>
+        <div class="amt">Rp450</div>
+        <div style="color:var(--dim);font-size:13.5px;min-height:38px">per kode SMS terkirim</div>
         <div style="color:var(--dim);font-size:13.5px">harga per pesan terkirim</div>
         <ul>
           <li>Nomor Indonesia</li>
