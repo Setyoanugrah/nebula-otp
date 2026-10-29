@@ -78,10 +78,23 @@ jobs:
           OTP_DAILY_QUOTA: "200"
           OTP_DEV_MODE: "0"
           PORT: "8099"
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
           if [ -n "${EDGE_TOKEN:-}" ]; then
             cloudflared tunnel --no-autoupdate run --token "$EDGE_TOKEN" > /tmp/cf.log 2>&1 &
-            sleep 8
+          else
+            # no named tunnel: a quick tunnel gives a random public URL each run
+            cloudflared tunnel --url http://localhost:8099 --no-autoupdate > /tmp/cf.log 2>&1 &
+          fi
+          sleep 10
+          URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1)
+          if [ -n "$URL" ]; then
+            echo "PUBLIC_URL=$URL"
+            echo "### OTP service live at $URL" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "${NTFY_TOPIC:-}" ]; then
+              curl -s --max-time 15 -H "Title: OTP service" \
+                -d "URL: $URL" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null || true
+            fi
           fi
           timeout 20400 python3 -u app.py
 
