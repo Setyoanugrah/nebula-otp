@@ -113,6 +113,27 @@ def migrate() -> None:
                 created_at  INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_sends_key ON sends(key_id, created_at);
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                token_hash TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS uptime_targets (
+                id         INTEGER PRIMARY KEY,
+                label      TEXT NOT NULL,
+                url        TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS uptime_results (
+                id         INTEGER PRIMARY KEY,
+                target_id  INTEGER NOT NULL,
+                ok         INTEGER NOT NULL,
+                status     INTEGER,
+                ms         INTEGER,
+                error      TEXT,
+                checked_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_uptime_t ON uptime_results(target_id, checked_at);
             """
         )
 
@@ -155,6 +176,11 @@ def migrate() -> None:
                 )
         # old projects table is unused by v2
         con.execute("DROP TABLE IF EXISTS projects")
+
+        # admin keys can bypass quota and cooldown
+        kcols = [r[1] for r in con.execute("PRAGMA table_info(keys)")]
+        if "unlimited" not in kcols:
+            con.execute("ALTER TABLE keys ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0")
 
 
 migrate()
@@ -210,6 +236,29 @@ def require_user(request: Request) -> sqlite3.Row:
     if not user:
         raise HTTPException(401, "login required")
     return user
+
+
+# ------------------------------------------------------------------- admin auth
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "icarusvospie@gmail.com")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Jenkijen9901")
+ADMIN_PATH = os.environ.get("ADMIN_PATH", "administrator")
+
+
+def admin_session(request: Request) -> bool:
+    token = request.cookies.get("nebula_admin")
+    if not token:
+        return False
+    with db() as con:
+        row = con.execute(
+            "SELECT 1 FROM admin_sessions WHERE token_hash=? AND expires_at>?",
+            (sha(token), now()),
+        ).fetchone()
+    return row is not None
+
+
+def require_admin(request: Request) -> None:
+    if not admin_session(request):
+        raise HTTPException(401, "admin login required")
 
 
 # ---------------------------------------------------------------------- keys
@@ -365,11 +414,13 @@ def otp_send(body: SendIn, x_api_key: str | None = Header(default=None)) -> dict
             (owner["id"], dest),
         ).fetchone()["t"] or 0
 
-    if used >= DAILY_QUOTA:
-        raise HTTPException(429, "daily quota reached for this key")
-    elapsed = now() - int(last)
-    if elapsed < COOLDOWN:
-        raise HTTPException(429, f"wait {COOLDOWN - elapsed}s before resending")
+    unlimited = bool(owner["unlimited"]) if "unlimited" in owner.keys() else False
+    if not unlimited:
+        if used >= DAILY_QUOTA:
+            raise HTTPException(429, "daily quota reached for this key")
+        elapsed = now() - int(last)
+        if elapsed < COOLDOWN:
+            raise HTTPException(429, f"wait {COOLDOWN - elapsed}s before resending")
 
     code = f"{secrets.randbelow(1_000_000):06d}"
     salt = secrets.token_hex(16)
@@ -437,6 +488,311 @@ def otp_verify(body: VerifyIn, x_api_key: str | None = Header(default=None)) -> 
         con.execute("UPDATE codes SET consumed_at=? WHERE id=?", (now(), row["id"]))
 
     return {"ok": True, "verified": True, "destination": dest}
+
+
+# ----------------------------------------------------------------- admin routes
+UPTIME_TIMEOUT = int(os.environ.get("UPTIME_TIMEOUT", "10"))
+
+
+def check_url(url: str) -> dict[str, Any]:
+    """Fetch a URL and report status and latency. Never raises."""
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(url, method="GET",
+                                     headers={"User-Agent": "NebulaUptime/1.0"})
+        with urllib.request.urlopen(req, timeout=UPTIME_TIMEOUT) as r:
+            body = r.read(2048)
+            ms = int((time.time() - t0) * 1000)
+            return {"ok": 200 <= r.status < 400, "status": r.status, "ms": ms,
+                    "error": None, "bytes": len(body)}
+    except urllib.error.HTTPError as e:
+        ms = int((time.time() - t0) * 1000)
+        return {"ok": False, "status": e.code, "ms": ms, "error": f"HTTP {e.code}"}
+    except Exception as e:  # noqa: BLE001
+        ms = int((time.time() - t0) * 1000)
+        return {"ok": False, "status": None, "ms": ms, "error": type(e).__name__}
+
+
+@app.get("/" + ADMIN_PATH, response_class=HTMLResponse)
+def admin_login_page(request: Request, err: str = "") -> HTMLResponse:
+    if admin_session(request):
+        return RedirectResponse("/" + ADMIN_PATH + "/panel", status_code=303)
+    e = f'<div class="err">{err}</div>' if err else ""
+    body = f"""<div class="center">
+<h1>Administrator</h1><p class="sub">Panel internal Nebula OTP.</p>{e}
+<div class="card"><form method="post" action="/{ADMIN_PATH}">
+  <label>Email</label><input name="email" type="email" required autofocus>
+  <label>Password</label><input name="password" type="password" required>
+  <div style="margin-top:18px"><button type="submit">Masuk</button></div>
+</form></div></div>"""
+    return HTMLResponse(shell("Admin", body))
+
+
+@app.post("/" + ADMIN_PATH)
+def admin_login(email: str = Form(...), password: str = Form(...)) -> RedirectResponse:
+    ok_email = hmac.compare_digest(email.strip().lower(), ADMIN_EMAIL.lower())
+    ok_pass = hmac.compare_digest(password, ADMIN_PASSWORD)
+    if not (ok_email and ok_pass):
+        return RedirectResponse(f"/{ADMIN_PATH}?err=Kredensial+salah", status_code=303)
+    token = secrets.token_urlsafe(32)
+    with db() as con:
+        con.execute(
+            "INSERT INTO admin_sessions(token_hash,created_at,expires_at) VALUES(?,?,?)",
+            (sha(token), now(), now() + 7 * 86400),
+        )
+    resp = RedirectResponse(f"/{ADMIN_PATH}/panel", status_code=303)
+    resp.set_cookie("nebula_admin", token, httponly=True, samesite="lax",
+                    max_age=7 * 86400, path="/")
+    return resp
+
+
+@app.post("/" + ADMIN_PATH + "/logout")
+def admin_logout(request: Request) -> RedirectResponse:
+    token = request.cookies.get("nebula_admin")
+    if token:
+        with db() as con:
+            con.execute("DELETE FROM admin_sessions WHERE token_hash=?", (sha(token),))
+    resp = RedirectResponse("/" + ADMIN_PATH, status_code=303)
+    resp.delete_cookie("nebula_admin", path="/")
+    return resp
+
+
+@app.get("/" + ADMIN_PATH + "/panel", response_class=HTMLResponse)
+def admin_panel(request: Request, new: str = "", added: str = "") -> HTMLResponse:
+    if not admin_session(request):
+        return RedirectResponse("/" + ADMIN_PATH, status_code=303)
+
+    # check every target on each panel load, keeping only the last 40 results
+    with db() as con:
+        _targets = con.execute("SELECT * FROM uptime_targets").fetchall()
+    for _t in _targets:
+        _r = check_url(_t["url"])
+        with db() as con:
+            con.execute(
+                "INSERT INTO uptime_results(target_id,ok,status,ms,error,checked_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (_t["id"], 1 if _r["ok"] else 0, _r["status"], _r["ms"], _r["error"], now()),
+            )
+            con.execute(
+                "DELETE FROM uptime_results WHERE target_id=? AND id NOT IN"
+                " (SELECT id FROM uptime_results WHERE target_id=? ORDER BY id DESC LIMIT 40)",
+                (_t["id"], _t["id"]),
+            )
+
+    with db() as con:
+        keys = con.execute(
+            "SELECT k.*, u.email FROM keys k LEFT JOIN users u ON u.id=k.user_id"
+            " ORDER BY k.id DESC LIMIT 200"
+        ).fetchall()
+        targets = con.execute("SELECT * FROM uptime_targets ORDER BY id").fetchall()
+        totals = {
+            "keys": con.execute("SELECT COUNT(*) c FROM keys WHERE revoked=0").fetchone()["c"],
+            "users": con.execute("SELECT COUNT(*) c FROM users").fetchone()["c"],
+            "sends24": con.execute(
+                "SELECT COUNT(*) c FROM sends WHERE created_at>?", (now() - 86400,)
+            ).fetchone()["c"],
+            "sends": con.execute("SELECT COUNT(*) c FROM sends").fetchone()["c"],
+            "codes": con.execute(
+                "SELECT COUNT(*) c FROM codes WHERE consumed_at IS NULL AND expires_at>?",
+                (now(),),
+            ).fetchone()["c"],
+        }
+
+    banner = ""
+    if new:
+        banner = f"""<div class="newkey">
+  <div style="font-weight:600;margin-bottom:4px">API key dibuat</div>
+  <div class="val">{new}</div>
+  <p class="warn">Simpan sekarang — tidak bisa ditampilkan lagi.</p>
+</div>"""
+
+    # uptime rows
+    up_rows = ""
+    for t in targets:
+        with db() as con:
+            last = con.execute(
+                "SELECT * FROM uptime_results WHERE target_id=? ORDER BY id DESC LIMIT 1",
+                (t["id"],),
+            ).fetchone()
+            hist = con.execute(
+                "SELECT ok FROM uptime_results WHERE target_id=? ORDER BY id DESC LIMIT 40",
+                (t["id"],),
+            ).fetchall()
+        if last:
+            dot = "#34d399" if last["ok"] else "#f87171"
+            state = "UP" if last["ok"] else "DOWN"
+            detail = f'{last["status"] or "-"} · {last["ms"]}ms'
+            if last["error"]:
+                detail += f' · {last["error"]}'
+        else:
+            dot, state, detail = "#8b98a8", "—", "belum dicek"
+        bars = "".join(
+            f'<span style="display:inline-block;width:6px;height:16px;margin-right:2px;'
+            f'border-radius:2px;background:{"#34d399" if h["ok"] else "#f87171"}"></span>'
+            for h in reversed(hist)
+        )
+        up_rows += (f'<tr><td><b>{t["label"]}</b><br><span class="muted">{t["url"]}</span></td>'
+                    f'<td><span style="color:{dot};font-weight:700">{state}</span></td>'
+                    f'<td class="muted">{detail}</td><td>{bars or "—"}</td>'
+                    f'<td><form method="post" action="/{ADMIN_PATH}/uptime/{t["id"]}/delete" style="margin:0">'
+                    f'<button class="danger" type="submit">Hapus</button></form></td></tr>')
+    if not up_rows:
+        up_rows = '<tr><td colspan="5" class="muted" style="padding:20px 10px">Belum ada target.</td></tr>'
+
+    # key rows
+    key_rows = ""
+    for k in keys:
+        state = ('<span style="color:#f87171">dicabut</span>' if k["revoked"]
+                 else '<span style="color:#34d399">aktif</span>')
+        unl = ('<span style="color:#fbbf24;font-weight:700">∞ unlimited</span>'
+               if k["unlimited"] else '<span class="muted">terbatas</span>')
+        used = time.strftime("%d %b %H:%M", time.localtime(k["last_used"])) if k["last_used"] else "—"
+        act = ""
+        if not k["revoked"]:
+            act = (f'<form method="post" action="/{ADMIN_PATH}/keys/{k["id"]}/revoke" style="margin:0">'
+                   f'<button class="danger" type="submit">Cabut</button></form>')
+        key_rows += (f'<tr><td><b>{k["name"]}</b><br><span class="muted">{k["email"] or "-"}</span></td>'
+                     f'<td><code>{k["prefix"]}…</code></td><td>{state}</td><td>{unl}</td>'
+                     f'<td class="muted">{used}</td><td>{act}</td></tr>')
+    if not key_rows:
+        key_rows = '<tr><td colspan="6" class="muted" style="padding:20px 10px">Belum ada key.</td></tr>'
+
+    body = f"""<h1>Panel Administrator</h1>
+<p class="sub">{ADMIN_EMAIL}</p>
+{banner}
+<div class="card">
+  <table>
+    <tr><td class="muted">API key aktif</td><td><b>{totals["keys"]}</b></td></tr>
+    <tr><td class="muted">User terdaftar</td><td><b>{totals["users"]}</b></td></tr>
+    <tr><td class="muted">Kirim 24 jam</td><td><b>{totals["sends24"]}</b></td></tr>
+    <tr><td class="muted">Total kirim</td><td><b>{totals["sends"]}</b></td></tr>
+    <tr><td class="muted">Kode aktif</td><td><b>{totals["codes"]}</b></td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Buat API key</h2>
+  <form method="post" action="/{ADMIN_PATH}/keys" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <div style="flex:1;min-width:180px">
+      <label style="margin-top:0">Nama key</label>
+      <input name="name" placeholder="internal-bot" required>
+    </div>
+    <div style="min-width:160px">
+      <label style="margin-top:0">Pemilik (opsional)</label>
+      <input name="owner" placeholder="email user">
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin:0 0 11px;text-transform:none;
+           font-size:14px;letter-spacing:0;color:var(--ink)">
+      <input type="checkbox" name="unlimited" value="1" style="width:auto">
+      Unlimited usage
+    </label>
+    <button type="submit">Generate</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Uptime website</h2>
+  <table>
+    <tr><th>Target</th><th>Status</th><th>Detail</th><th>40 cek terakhir</th><th></th></tr>
+    {up_rows}
+  </table>
+  <form method="post" action="/{ADMIN_PATH}/uptime" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:18px">
+    <div style="flex:1;min-width:160px">
+      <label style="margin-top:0">Label</label>
+      <input name="label" placeholder="Nebula Drive" required>
+    </div>
+    <div style="flex:2;min-width:220px">
+      <label style="margin-top:0">URL</label>
+      <input name="url" placeholder="https://drive.rikuzetsi.my.id/api/health" required>
+    </div>
+    <button type="submit">Tambah</button>
+  </form>
+  <p class="muted" style="margin:14px 0 0">Cek dijalankan tiap kali halaman ini dibuka.</p>
+</div>
+
+<div class="card">
+  <h2>Semua API key</h2>
+  <table>
+    <tr><th>Nama</th><th>Key</th><th>Status</th><th>Kuota</th><th>Terakhir</th><th></th></tr>
+    {key_rows}
+  </table>
+</div>
+<form method="post" action="/{ADMIN_PATH}/logout"><button class="ghost" type="submit">Keluar</button></form>"""
+    return HTMLResponse(shell("Admin", body))
+
+
+@app.post("/" + ADMIN_PATH + "/keys")
+def admin_create_key(request: Request, name: str = Form(...), owner: str = Form(""),
+                     unlimited: str = Form("")) -> RedirectResponse:
+    if not admin_session(request):
+        return RedirectResponse("/" + ADMIN_PATH, status_code=303)
+    uid = None
+    if owner.strip():
+        with db() as con:
+            row = con.execute("SELECT id FROM users WHERE email=?",
+                              (owner.strip().lower(),)).fetchone()
+            uid = row["id"] if row else None
+    raw = new_key()
+    with db() as con:
+        con.execute(
+            "INSERT INTO keys(user_id,name,prefix,key_hash,created_at,unlimited)"
+            " VALUES(?,?,?,?,?,?)",
+            (uid or 0, name.strip()[:60] or "admin", raw[:12], sha(raw), now(),
+             1 if unlimited == "1" else 0),
+        )
+    return RedirectResponse(f"/{ADMIN_PATH}/panel?new={raw}", status_code=303)
+
+
+@app.post("/" + ADMIN_PATH + "/keys/{kid}/revoke")
+def admin_revoke_key(request: Request, kid: int) -> RedirectResponse:
+    if not admin_session(request):
+        return RedirectResponse("/" + ADMIN_PATH, status_code=303)
+    with db() as con:
+        con.execute("UPDATE keys SET revoked=1 WHERE id=?", (kid,))
+    return RedirectResponse(f"/{ADMIN_PATH}/panel", status_code=303)
+
+
+@app.post("/" + ADMIN_PATH + "/uptime")
+def admin_add_uptime(request: Request, label: str = Form(...), url: str = Form(...)) -> RedirectResponse:
+    if not admin_session(request):
+        return RedirectResponse("/" + ADMIN_PATH, status_code=303)
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    with db() as con:
+        con.execute("INSERT INTO uptime_targets(label,url,created_at) VALUES(?,?,?)",
+                    (label.strip()[:60], url, now()))
+    return RedirectResponse(f"/{ADMIN_PATH}/panel", status_code=303)
+
+
+@app.post("/" + ADMIN_PATH + "/uptime/{tid}/delete")
+def admin_del_uptime(request: Request, tid: int) -> RedirectResponse:
+    if not admin_session(request):
+        return RedirectResponse("/" + ADMIN_PATH, status_code=303)
+    with db() as con:
+        con.execute("DELETE FROM uptime_targets WHERE id=?", (tid,))
+        con.execute("DELETE FROM uptime_results WHERE target_id=?", (tid,))
+    return RedirectResponse(f"/{ADMIN_PATH}/panel", status_code=303)
+
+
+@app.post("/" + ADMIN_PATH + "/uptime/check")
+def admin_check_uptime(request: Request) -> JSONResponse:
+    if not admin_session(request):
+        raise HTTPException(401, "admin login required")
+    with db() as con:
+        targets = con.execute("SELECT * FROM uptime_targets").fetchall()
+    out = []
+    for t in targets:
+        res = check_url(t["url"])
+        with db() as con:
+            con.execute(
+                "INSERT INTO uptime_results(target_id,ok,status,ms,error,checked_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (t["id"], 1 if res["ok"] else 0, res["status"], res["ms"],
+                 res["error"], now()),
+            )
+        out.append({"label": t["label"], **res})
+    return JSONResponse({"ok": True, "checked": len(out), "results": out})
 
 
 # ---------------------------------------------------------------------- styles
