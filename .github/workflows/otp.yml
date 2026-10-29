@@ -25,6 +25,7 @@ jobs:
       - name: Restore database
         env:
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+          BACKUP_REPO: ${{ secrets.BACKUP_REPO }}
         run: |
           mkdir -p data
           python3 - <<'EOF'
@@ -35,8 +36,10 @@ jobs:
               print("no STATE_TOKEN, starting with an empty database")
               raise SystemExit(0)
 
-          repo = os.environ["GITHUB_REPOSITORY"]
-          url = f"https://api.github.com/repos/{repo}/contents/backup/otp.db.b64"
+          # the service repo is public (unlimited runner minutes); the database
+          # holds live credentials, so it is backed up to a private repo instead
+          repo = os.environ.get("BACKUP_REPO") or os.environ["GITHUB_REPOSITORY"]
+          url = f"https://api.github.com/repos/{repo}/contents/otp.db.b64"
           req = urllib.request.Request(url, headers={"Authorization": f"token {tok}"})
           try:
               with urllib.request.urlopen(req, timeout=60) as r:
@@ -86,6 +89,7 @@ jobs:
         if: always()
         env:
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+          BACKUP_REPO: ${{ secrets.BACKUP_REPO }}
         run: |
           python3 - <<'EOF'
           import base64, json, os, urllib.request, urllib.error
@@ -96,8 +100,8 @@ jobs:
               print("nothing to back up")
               raise SystemExit(0)
 
-          repo = os.environ["GITHUB_REPOSITORY"]
-          api = f"https://api.github.com/repos/{repo}/contents/backup/otp.db.b64"
+          repo = os.environ.get("BACKUP_REPO") or os.environ["GITHUB_REPOSITORY"]
+          api = f"https://api.github.com/repos/{repo}/contents/otp.db.b64"
           raw = base64.b64encode(open(path, "rb").read()).decode()
 
           sha = None
