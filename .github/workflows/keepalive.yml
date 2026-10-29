@@ -1,0 +1,31 @@
+name: keepalive
+
+on:
+  schedule:
+    # a dead run is restarted within 20 minutes at worst
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: ensure one service run
+        env:
+          GH_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then echo "no STATE_TOKEN — skip"; exit 0; fi
+          n=$(gh run list -R "$GITHUB_REPOSITORY" -w otp.yml -L 10 --json status \
+              --jq '[.[] | select(.status=="in_progress" or .status=="queued")] | length')
+          echo "active=$n"
+          if [ "${n:-0}" -eq 0 ]; then
+            gh workflow run otp.yml -R "$GITHUB_REPOSITORY" --ref main
+            echo "dispatched"
+          else
+            echo "nothing to do"
+          fi
