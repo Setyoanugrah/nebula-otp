@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nebula OTP — layanan kode verifikasi untuk website & bot</title>
+<meta name="description" content="Kirim OTP lewat email, SMS, atau WhatsApp. Satu API, harga rupiah, tanpa langganan auth SaaS asing.">
+<style>
+:root{
+  --bg:#080a0d; --card:#11151b; --line:#1f2731; --ink:#e8edf3; --dim:#8b98a8;
+  --accent:#3b82f6; --accent2:#60a5fa; --ok:#34d399;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+ font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+ -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+a{color:var(--accent2);text-decoration:none}
+a:hover{text-decoration:underline}
+
+header{border-bottom:1px solid var(--line);padding:20px 0;position:sticky;top:0;
+ background:rgba(8,10,13,.85);backdrop-filter:blur(12px);z-index:10}
+header .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.logo{font-weight:700;letter-spacing:.3px;font-size:17px}
+.logo span{color:var(--accent2)}
+nav a{color:var(--dim);margin-left:22px;font-size:14.5px}
+nav a:hover{color:var(--ink);text-decoration:none}
+
+.hero{padding:88px 0 64px;text-align:center}
+.hero h1{font-size:clamp(30px,5vw,50px);line-height:1.15;margin:0 0 20px;letter-spacing:-.8px}
+.hero h1 em{font-style:normal;color:var(--accent2)}
+.hero p{color:var(--dim);font-size:18px;max-width:640px;margin:0 auto 34px}
+.cta{display:inline-flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.btn{display:inline-block;padding:13px 26px;border-radius:9px;font-weight:600;font-size:15px}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.primary:hover{background:#4a90ff;text-decoration:none}
+.btn.ghost{border:1px solid var(--line);color:var(--ink)}
+.btn.ghost:hover{border-color:var(--accent);text-decoration:none}
+
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+ padding:36px 0 64px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
+.card h3{margin:0 0 10px;font-size:16.5px}
+.card p{margin:0;color:var(--dim);font-size:14.5px}
+.ico{width:34px;height:34px;border-radius:9px;background:rgba(59,130,246,.14);
+ color:var(--accent2);display:grid;place-items:center;margin-bottom:14px;font-weight:700}
+
+section{padding:56px 0}
+section h2{font-size:clamp(22px,3.4vw,32px);margin:0 0 12px;letter-spacing:-.4px}
+section .lede{color:var(--dim);margin:0 0 34px;max-width:640px}
+
+pre{background:#0b0f14;border:1px solid var(--line);border-radius:11px;padding:18px;
+ overflow:auto;font:13.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d6e4}
+pre .k{color:#7dd3fc}
+pre .s{color:#86efac}
+pre .c{color:#5b6779}
+
+.price{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.plan{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;
+ display:flex;flex-direction:column}
+.plan.hot{border-color:var(--accent);box-shadow:0 0 0 1px rgba(59,130,246,.25)}
+.tag{font-size:11.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent2);
+ font-weight:700;margin-bottom:8px}
+.plan .amt{font-size:32px;font-weight:700;letter-spacing:-1px;margin:6px 0 2px}
+.plan .amt small{font-size:14px;font-weight:400;color:var(--dim);letter-spacing:0}
+.plan ul{list-style:none;padding:0;margin:18px 0 0;font-size:14.5px;color:var(--dim)}
+.plan li{padding:7px 0 7px 24px;position:relative}
+.plan li::before{content:"✓";position:absolute;left:0;color:var(--ok);font-weight:700}
+.plan .btn{margin-top:auto;text-align:center;margin-top:22px}
+
+.note{border-left:3px solid var(--accent);background:rgba(59,130,246,.06);
+ padding:16px 20px;border-radius:0 9px 9px 0;color:var(--dim);font-size:14.5px}
+.note b{color:var(--ink)}
+
+footer{border-top:1px solid var(--line);padding:34px 0;color:var(--dim);font-size:14px}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+@media(max-width:640px){
+ nav{display:none}
+ .hero{padding:56px 0 40px}
+}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <div class="logo">Nebula<span>OTP</span></div>
+  <nav>
+    <a href="#fitur">Fitur</a>
+    <a href="#api">API</a>
+    <a href="#harga">Harga</a>
+    <a href="#kontak">Kontak</a>
+  </nav>
+</div></header>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>Kode verifikasi untuk aplikasi kamu,<br><em>tanpa ribet auth SaaS</em></h1>
+    <p>Kirim OTP lewat email, SMS, atau WhatsApp. Satu endpoint untuk kirim,
+       satu untuk verifikasi. Harga rupiah, bayar sesuai pakai.</p>
+    <div class="cta">
+      <a class="btn primary" href="#kontak">Coba gratis 100 kode</a>
+      <a class="btn ghost" href="#api">Lihat API</a>
+    </div>
+  </div>
+
+  <div class="grid" id="fitur">
+    <div class="card">
+      <div class="ico">1</div>
+      <h3>Satu API, tiga kanal</h3>
+      <p>Email, SMS, WhatsApp. Ganti kanal cukup ubah satu field, kode integrasi tetap sama.</p>
+    </div>
+    <div class="card">
+      <div class="ico">2</div>
+      <h3>Aman by default</h3>
+      <p>Kode disimpan sebagai hash bersalt, bukan teks biasa. Maksimal 5 percobaan, lalu kode dibakar.</p>
+    </div>
+    <div class="card">
+      <div class="ico">3</div>
+      <h3>Anti spam</h3>
+      <p>Cooldown 60 detik per nomor dan kuota harian per API key. SMS bombing tidak bisa terjadi.</p>
+    </div>
+    <div class="card">
+      <div class="ico">4</div>
+      <h3>Dashboard sendiri</h3>
+      <p>Pantau pengiriman, bikin API key baru, dan lihat statistik tanpa perlu buka tiket.</p>
+    </div>
+  </div>
+
+  <section id="api">
+    <h2>Integrasi 5 menit</h2>
+    <p class="lede">Dua request. Tidak ada SDK yang harus dipelajari, tidak ada dependency aneh.</p>
+<pre><span class="c"># 1. kirim kode</span>
+curl -X POST https://api.nebulaotp.id/v1/otp/send \
+  -H <span class="s">"X-API-Key: otp_xxxxxxxx"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"channel":"email","destination":"user@mail.com"}'</span>
+
+<span class="c"># 2. verifikasi kode yang diketik user</span>
+curl -X POST https://api.nebulaotp.id/v1/otp/verify \
+  -H <span class="s">"X-API-Key: otp_xxxxxxxx"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"channel":"email","destination":"user@mail.com","code":"123456"}'</span>
+
+<span class="c"># -> {"ok": true, "verified": true}</span></pre>
+    <div class="note" style="margin-top:22px">
+      <b>API key jangan ditaruh di browser.</b> Panggil dari backend kamu, lalu teruskan
+      hasilnya ke frontend. Kami sediakan contoh Express dan FastAPI siap pakai.
+    </div>
+  </section>
+
+  <section id="harga">
+    <h2>Harga</h2>
+    <p class="lede">Bayar per kode terkirim. Tidak ada biaya setup, tidak ada kontrak.</p>
+    <div class="price">
+      <div class="plan">
+        <div class="tag">Coba</div>
+        <div class="amt">Rp0</div>
+        <div style="color:var(--dim);font-size:13.5px">buat project pertama kamu</div>
+        <ul>
+          <li>100 kode email</li>
+          <li>1 API key</li>
+          <li>Cooldown &amp; kuota aktif</li>
+          <li>Dukungan via chat</li>
+        </ul>
+        <a class="btn ghost" href="#kontak">Mulai</a>
+      </div>
+      <div class="plan hot">
+        <div class="tag">Populer</div>
+        <div class="amt">Rp75<small> / 1.000 kode email</small></div>
+        <div style="color:var(--dim);font-size:13.5px">cocok untuk aplikasi yang tumbuh</div>
+        <ul>
+          <li>Email tanpa batas project</li>
+          <li>API key tak terbatas</li>
+          <li>Dashboard &amp; statistik</li>
+          <li>Log pengiriman 30 hari</li>
+        </ul>
+        <a class="btn primary" href="#kontak">Ambil paket</a>
+      </div>
+      <div class="plan">
+        <div class="tag">SMS &amp; WhatsApp</div>
+        <div class="amt">Rp450<small> / kode</small></div>
+        <div style="color:var(--dim);font-size:13.5px">harga per pesan terkirim</div>
+        <ul>
+          <li>Nomor Indonesia</li>
+          <li>Fallback ke WhatsApp</li>
+          <li>Prioritas antrian</li>
+          <li>Laporan pengiriman</li>
+        </ul>
+        <a class="btn ghost" href="#kontak">Tanya dulu</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="kontak">
+    <h2>Siap dipakai hari ini</h2>
+    <p class="lede">Kirim detail singkat aplikasi kamu — jumlah user, kanal yang dipakai —
+       dan kami siapkan API key dalam hitungan jam.</p>
+    <div class="card">
+      <h3>Kontak</h3>
+      <p style="margin-top:10px">
+        WhatsApp / Telegram: <b>+62 8xx xxxx xxxx</b><br>
+        Email: <b>halo@nebulaotp.id</b>
+      </p>
+    </div>
+  </section>
+</div>
+
+<footer><div class="wrap">
+  <div>© 2026 Nebula OTP</div>
+  <div>Dibangun dengan FastAPI · data disimpan di Indonesia</div>
+</div></footer>
+
+</body>
+</html>
